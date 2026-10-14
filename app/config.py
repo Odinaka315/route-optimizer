@@ -33,7 +33,8 @@ class Settings(BaseSettings):
 
     # --- auth ---------------------------------------------------------------
     secret_key: str = Field(min_length=32)
-    access_token_expire_minutes: int = Field(60 * 24, ge=1)
+    access_token_expire_minutes: int = Field(15, ge=1)  # short: the refresh token keeps people signed in
+    refresh_token_expire_days: int = Field(30, ge=1)  # each refresh restarts this clock
     verify_token_expire_hours: int = Field(48, ge=1)
     reset_token_expire_minutes: int = Field(60, ge=1)
     require_email_verification: bool = True

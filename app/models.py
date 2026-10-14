@@ -76,6 +76,36 @@ class User(Base):
     __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
 
 
+class RefreshToken(Base):
+    """A long-lived login credential, stored only as a SHA-256 hash.
+
+    Every use rotates the token: the old row is revoked and points at its replacement
+    (``replaced_by_id``). All tokens descended from one login share a ``family_id``, which
+    is one "session": logging out revokes the family, and presenting an already-rotated
+    token (a sign of theft) revokes it too."""
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    family_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("refresh_tokens.id", ondelete="SET NULL")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_refresh_tokens_token_hash"),
+        Index("ix_refresh_tokens_user_id", "user_id"),
+        Index("ix_refresh_tokens_family_id", "family_id"),
+    )
+
+
 class Trip(Base):
     """One plotted trip. Editing a trip never mutates it: it creates a copy whose
     parent_trip_id points back here (see the modify endpoint)."""

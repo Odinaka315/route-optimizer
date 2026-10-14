@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -73,3 +74,14 @@ def decode_token(secret: str, token: str, *, purpose: str) -> dict:
     if payload.get("purpose") != purpose:
         raise TokenError("Token cannot be used for this action")
     return payload
+
+
+def new_refresh_token() -> str:
+    """A random, opaque credential (not a JWT): it is only ever meaningful as a lookup key."""
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(token: str) -> str:
+    """SHA-256 is enough here (unlike passwords): the input is 384 random bits, so there is
+    nothing to brute-force, and lookups need a deterministic hash."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

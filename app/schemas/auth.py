@@ -23,7 +23,13 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
-    expires_in: int  # seconds
+    expires_in: int  # access token lifetime, seconds
+    refresh_token: str
+    refresh_expires_in: int  # seconds
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=512)
 
 
 class UserOut(BaseModel):

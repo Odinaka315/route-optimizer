@@ -12,6 +12,8 @@ from app.security import (
     create_token,
     decode_token,
     hash_password,
+    hash_refresh_token,
+    new_refresh_token,
     password_fingerprint,
     verify_password,
 )
@@ -85,6 +87,13 @@ def test_fingerprint_changes_with_the_hash():
     assert password_fingerprint("hash-one") == password_fingerprint("hash-one")
 
 
+def test_refresh_tokens_are_random_and_hash_deterministically():
+    a, b = new_refresh_token(), new_refresh_token()
+    assert a != b and len(a) >= 64
+    assert hash_refresh_token(a) == hash_refresh_token(a) != hash_refresh_token(b)
+    assert len(hash_refresh_token(a)) == 64 and a not in hash_refresh_token(a)
+
+
 # --- database URLs -----------------------------------------------------------------
 
 
@@ -153,6 +162,11 @@ def test_smtp_needs_a_host():
 def test_production_rejects_placeholder_secret():
     with pytest.raises(ValueError, match="placeholder"):
         make(environment="production", secret_key="change-me-" + "x" * 30)
+
+
+def test_token_lifetime_defaults_are_short_access_long_refresh():
+    s = make()
+    assert s.access_token_expire_minutes == 15 and s.refresh_token_expire_days == 30
 
 
 def test_cors_origins_parsed_from_comma_list():

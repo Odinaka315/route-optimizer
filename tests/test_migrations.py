@@ -33,7 +33,9 @@ def read_schema(url: str) -> dict:
     def collect(connection):
         inspector = inspect(connection)
         tables = set(inspector.get_table_names())
-        schema = {"tables": tables, "trips_indexes": set(), "trip_stops_indexes": {}}
+        schema = {"tables": tables, "trips_indexes": set(), "trip_stops_indexes": {}, "refresh_indexes": set()}
+        if "refresh_tokens" in tables:
+            schema["refresh_indexes"] = {i["name"] for i in inspector.get_indexes("refresh_tokens")}
         if "trips" in tables:
             schema["trips_indexes"] = {i["name"] for i in inspector.get_indexes("trips")}
         if "trip_stops" in tables:
@@ -74,6 +76,7 @@ def test_upgrade_matches_models_and_downgrades_cleanly(database_url):
         assert EXPECTED_TABLES <= schema["tables"]
         assert {"ix_trips_user_created", "ix_trips_user_starred", "ix_trips_parent_trip_id"} <= schema["trips_indexes"]
         assert bool(schema["trip_stops_indexes"].get("uq_trip_stops_one_start"))  # present and unique
+        assert {"ix_refresh_tokens_user_id", "ix_refresh_tokens_family_id"} <= schema["refresh_indexes"]
     finally:
         command.downgrade(cfg, "base")
 
