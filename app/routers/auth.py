@@ -21,11 +21,20 @@ from ..schemas.auth import (
     EmailRequest,
     LoginRequest,
     MessageResponse,
+    RefreshRequest,
     ResetPasswordRequest,
     SignupRequest,
     TokenResponse,
     UserOut,
     VerifyEmailRequest,
+)
+from ..services.refresh_tokens import (
+    RefreshError,
+    issue_refresh_token,
+    purge_expired,
+    revoke_all_for_user,
+    revoke_session,
+    rotate_refresh_token,
 )
 from ..security import (
     DUMMY_HASH,
@@ -83,12 +92,25 @@ def _reset_message(user: User, settings: Settings) -> EmailMessage:
     return password_reset_email(user.email, link, settings.reset_token_expire_minutes)
 
 
-def _access_token(user: User, settings: Settings) -> TokenResponse:
+def _token_response(user_id: uuid.UUID, refresh_token: str, settings: Settings) -> TokenResponse:
     expires = timedelta(minutes=settings.access_token_expire_minutes)
-    token = create_token(
-        settings.secret_key, subject=str(user.id), purpose="access", expires_in=expires
+    access = create_token(
+        settings.secret_key, subject=str(user_id), purpose="access", expires_in=expires
     )
-    return TokenResponse(access_token=token, expires_in=int(expires.total_seconds()))
+    return TokenResponse(
+        access_token=access,
+        expires_in=int(expires.total_seconds()),
+        refresh_token=refresh_token,
+        refresh_expires_in=int(timedelta(days=settings.refresh_token_expire_days).total_seconds()),
+    )
+
+
+async def _start_session(session: AsyncSession, user: User, settings: Settings) -> TokenResponse:
+    """A successful login: a new refresh-token family plus a fresh access token."""
+    await purge_expired(session, user_id=user.id)
+    refresh = await issue_refresh_token(session, user.id, settings)
+    await session.commit()
+    return _token_response(user.id, refresh, settings)
 
 
 async def _authenticate(
@@ -179,7 +201,7 @@ async def login(
     settings: Settings = Depends(get_settings_dep),
 ) -> TokenResponse:
     user = await _authenticate(session, settings, body.email, body.password)
-    return _access_token(user, settings)
+    return await _start_session(session, user, settings)
 
 
 @router.post("/token", response_model=TokenResponse, include_in_schema=True)
@@ -191,7 +213,51 @@ async def token_form(
     """Same as /auth/login but takes form fields (``username`` = email). Exists so the
     Authorize button in the interactive docs page works."""
     user = await _authenticate(session, settings, form.username, form.password)
-    return _access_token(user, settings)
+    return await _start_session(session, user, settings)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    body: RefreshRequest,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings_dep),
+) -> TokenResponse:
+    """Swap a refresh token for a new access token **and a new refresh token**. The old
+    refresh token stops working at once, so always store the new one."""
+    invalid = HTTPException(
+        status.HTTP_401_UNAUTHORIZED,
+        "Invalid or expired refresh token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        user_id, new_refresh = await rotate_refresh_token(session, body.refresh_token, settings)
+    except RefreshError:
+        raise invalid from None
+    user = await session.get(User, user_id)
+    if user is None or not user.is_active:
+        raise invalid
+    return _token_response(user_id, new_refresh, settings)
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    body: RefreshRequest, session: AsyncSession = Depends(get_session)
+) -> MessageResponse:
+    """End this device's session. Needs only the refresh token (the access token may
+    already have expired). Always succeeds, so it is safe to retry."""
+    await revoke_session(session, body.refresh_token)
+    return MessageResponse(message="Logged out.")
+
+
+@router.post("/logout-all", response_model=MessageResponse)
+async def logout_all(
+    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+) -> MessageResponse:
+    """Sign out of every device. Access tokens already issued still work until they
+    expire (at most ACCESS_TOKEN_EXPIRE_MINUTES)."""
+    await revoke_all_for_user(session, user.id)
+    await session.commit()
+    return MessageResponse(message="Logged out everywhere.")
 
 
 @router.post("/forgot-password", response_model=MessageResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -227,6 +293,8 @@ async def reset_password(
     user.password_hash = await run_in_threadpool(hash_password, body.new_password)
     if user.email_verified_at is None:  # following an emailed link proves ownership
         user.email_verified_at = datetime.now(timezone.utc)
+    # Whoever knew the old password (or holds a stolen session) must not stay signed in.
+    await revoke_all_for_user(session, user.id)
     await session.commit()
     return MessageResponse(message="Password updated. You can now log in.")
 

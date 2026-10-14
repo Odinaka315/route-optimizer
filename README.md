@@ -12,7 +12,7 @@ weighted mix of travel time and distance, then draws the route. Built for delive
 optimizer/   the engine: geocoding, travel-cost matrix, solvers, road geometry, map (version 1)
 app/         the API: routes, schemas, models, auth, background runs   (version 2)
 alembic/     database migrations
-tests/       204 tests
+tests/       225 tests
 main.py      the command-line tool (version 1)
 ```
 
@@ -62,8 +62,11 @@ link from the server terminal, verify, then use **Authorize** (your email as the
 | Endpoint | Purpose |
 |---|---|
 | `POST /auth/signup`, `/auth/verify-email`, `/auth/resend-verification` | Email sign-up with confirmation |
-| `POST /auth/login`, `GET /auth/me` | Log in (returns a bearer token), current user |
-| `POST /auth/forgot-password`, `/auth/reset-password` | Password reset by emailed link (each link works once) |
+| `POST /auth/login`, `GET /auth/me` | Log in (returns an access token and a refresh token), current user |
+| `POST /auth/refresh` | Swap a refresh token for a new access token **and a new refresh token** (the old one stops working) |
+| `POST /auth/logout` | End this device's session (send its refresh token) |
+| `POST /auth/logout-all` | Sign out of every device (needs the access token) |
+| `POST /auth/forgot-password`, `/auth/reset-password` | Password reset by emailed link (each link works once; resetting also signs out every device) |
 | `GET /geocode/search?q=` | Address suggestions for the app's search box |
 | `POST /optimize` | One-off: stops in, best order out. Nothing is saved |
 | `POST /trips` | Save a trip and start optimizing it (returns at once; poll the trip) |
@@ -89,6 +92,19 @@ trip whose `parent_trip_id` points to the original. Sending nothing duplicates t
 
 **Stops** are `{name, lat, lng}` (what the app sends after the user picks a search result or
 drops a pin) or just `{address}`, which the server geocodes and caches.
+
+### Staying logged in (refresh tokens)
+
+`/auth/login` returns `access_token` (15 min) and `refresh_token` (30 days). Send the access
+token as `Authorization: Bearer ...`. When the API answers 401, call `POST /auth/refresh` with the
+refresh token, then **save both new tokens**: every refresh token works once. Store the refresh
+token somewhere safe (Keychain/Keystore on mobile).
+
+Refresh tokens are random strings stored only as SHA-256 hashes in `refresh_tokens`. One login is
+one *session* (a chain of tokens). If an already-used token is presented again, the server assumes
+it was stolen and signs that session out. Don't retry a refresh whose response you never received
+more than once, or you may sign yourself out. Logout ends one session; password reset and
+`/auth/logout-all` end all of them.
 
 ### Address search: Nominatim or Mapbox
 
@@ -158,7 +174,7 @@ schema the models describe and that it downgrades cleanly.
   workers or guaranteed completion, move to a real queue (ARQ or Celery).
 - **OSRM:** the public demo server is for development only. Self-host it with the Nigeria
   OpenStreetMap extract before real use.
-- **Login tokens last 24 hours** (`ACCESS_TOKEN_EXPIRE_MINUTES`) and there are no refresh tokens yet.
+- **Access tokens can't be revoked.** They last 15 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`), so after logout or a password reset an already-issued access token still works until it expires. Refresh tokens last 30 days (`REFRESH_TOKEN_EXPIRE_DAYS`), restart on every refresh, and are revoked immediately.
 - **No rate limiting** on login or the other endpoints yet.
 - **No live traffic, time windows, multiple riders, or mid-route re-optimization** (version 3).
 

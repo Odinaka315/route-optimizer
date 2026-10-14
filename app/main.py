@@ -20,6 +20,7 @@ from .emailer import EmailSender, build_email_sender
 from .routers import auth, health, optimize, trips
 from .services.geocoding import Geocoder, build_geocoder
 from .services.jobs import sweep_stale_runs
+from .services.refresh_tokens import purge_expired
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,12 @@ def create_app(
                 logger.warning("Marked %d stuck optimization run(s) as failed", failed)
         except Exception:  # noqa: BLE001 - e.g. database still waking up; don't block startup
             logger.warning("Could not clean up stale runs at startup", exc_info=True)
+        try:
+            async with sessionmaker() as session:
+                await purge_expired(session)
+                await session.commit()
+        except Exception:  # noqa: BLE001 - housekeeping only
+            logger.warning("Could not purge expired refresh tokens at startup", exc_info=True)
         yield
         await engine.dispose()
 

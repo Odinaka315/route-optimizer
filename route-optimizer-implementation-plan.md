@@ -300,3 +300,18 @@ Refresh tokens and session management · rate limiting · a real job queue · se
 Nigeria extract · live/time-of-day traffic · time windows, service times, capacities, multiple
 riders, pickup/delivery pairs · customer ETAs, proof of delivery, dispatcher dashboard ·
 Dockerfile and CI · frontend (mobile) app · saved places / address book · trip sharing.
+
+
+## 12. Refresh tokens (added after V2)
+
+- Table `refresh_tokens` (migration `0002`): `id`, `user_id` (cascade), `family_id` (one login = one session),
+  `token_hash` (SHA-256, unique), `created_at`, `expires_at`, `revoked_at`, `replaced_by_id`.
+- Access token 15 min (JWT, unchanged); refresh token 30 days, opaque random string, rotated on every use.
+- `POST /auth/refresh` (rotate; atomic claim so concurrent refreshes cannot both succeed), `POST /auth/logout`
+  (revokes the session's family), `POST /auth/logout-all` (revokes all of the user's tokens).
+- Reuse detection: presenting an already-rotated token revokes its whole family.
+- Password reset revokes all of the user's refresh tokens.
+- Expired tokens are purged at login (per user) and at startup (after a 7-day grace so replays are still recognised).
+- Open: access tokens are not revocable (max 15 min of residual access); no per-device names/list endpoint;
+  no rate limiting on `/auth/refresh` or `/auth/login`; no short grace window for a client that retries a
+  refresh whose response was lost.
