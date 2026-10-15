@@ -44,7 +44,10 @@ async def resolve_or_http(
 
 
 def schedule_run(request: Request, background_tasks: BackgroundTasks, run_id: uuid.UUID) -> None:
-    """Run the optimization after the response has been sent."""
+    """Run the optimization after the response has been sent (inline mode). In worker
+    mode the queued run is already in the database and the worker picks it up."""
+    if request.app.state.settings.run_mode == "worker":
+        return
     background_tasks.add_task(
         execute_run,
         request.app.state.sessionmaker,

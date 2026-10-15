@@ -11,8 +11,9 @@ weighted mix of travel time and distance, then draws the route. Built for delive
 ```
 optimizer/   the engine: geocoding, travel-cost matrix, solvers, road geometry, map (version 1)
 app/         the API: routes, schemas, models, auth, background runs   (version 2)
+             app/worker.py is the optional separate worker process
 alembic/     database migrations
-tests/       225 tests
+tests/       245 tests
 main.py      the command-line tool (version 1)
 ```
 
@@ -93,6 +94,34 @@ trip whose `parent_trip_id` points to the original. Sending nothing duplicates t
 **Stops** are `{name, lat, lng}` (what the app sends after the user picks a search result or
 drops a pin) or just `{address}`, which the server geocodes and caches.
 
+### Running the solver in a separate worker (optional)
+
+By default (`RUN_MODE=inline`) the API solves trips itself in the background: simplest, fine for one
+server. For anything beyond that, run the solver as its own process:
+
+```bash
+# API: only queues runs
+RUN_MODE=worker uvicorn app.main:create_app --factory
+# Worker: same .env, separate process (start more copies to solve more trips at once)
+python -m app.worker
+```
+
+The `optimization_runs` table is the queue. A worker claims the oldest queued run in one short
+transaction (`FOR UPDATE SKIP LOCKED` on PostgreSQL, so several workers never take the same run),
+sends a heartbeat every third of `RUN_LEASE_SECONDS` while solving, and writes the result only if
+it still owns the run. Behaviour you get over inline mode:
+
+- **Survives restarts and crashes.** A run whose worker stopped heartbeating is put back in the
+  queue (or failed once `RUN_MAX_ATTEMPTS` is used up). On SIGTERM/Ctrl+C the worker lets running
+  solves finish for `WORKER_SHUTDOWN_GRACE_S`, then hands unfinished ones straight back.
+- **Retries** routing-service outages and unexpected errors, waiting attempt x `RUN_RETRY_BACKOFF_S`
+  between tries. Bad input (for example "no road route between A and B") is never retried.
+- While waiting for a retry the run stays `queued` and `error_message` says why.
+
+Run `alembic upgrade head` first (migration `0003` adds the queue columns). With no worker running,
+queued runs simply wait, so keep one running. Note that a polling worker keeps a Neon database awake
+(it won't scale to zero while the worker is up); raise `WORKER_POLL_INTERVAL_S` if that costs you.
+
 ### Staying logged in (refresh tokens)
 
 `/auth/login` returns `access_token` (15 min) and `refresh_token` (30 days). Send the access
@@ -169,9 +198,12 @@ schema the models describe and that it downgrades cleanly.
 
 ## Known limits (deliberate for now)
 
-- **Background runs live inside the web process.** If the server restarts mid-solve, that run is
-  marked failed at the next startup (after `RUN_TIMEOUT_MINUTES`) and can be re-run. For several
-  workers or guaranteed completion, move to a real queue (ARQ or Celery).
+- **Inline mode (the default) solves inside the web process.** If the server restarts mid-solve, that
+  run is marked failed at the next startup (after `RUN_TIMEOUT_MINUTES`) and can be re-run, and there
+  are no retries. Use `RUN_MODE=worker` plus `python -m app.worker` (see above) for restarts,
+  retries and several solvers.
+- **The worker polls** the database (no push notification), so a new run starts within
+  `WORKER_POLL_INTERVAL_S` seconds. It also doesn't prioritise: runs are taken oldest first.
 - **OSRM:** the public demo server is for development only. Self-host it with the Nigeria
   OpenStreetMap extract before real use.
 - **Access tokens can't be revoked.** They last 15 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`), so after logout or a password reset an already-issued access token still works until it expires. Refresh tokens last 30 days (`REFRESH_TOKEN_EXPIRE_DAYS`), restart on every refresh, and are revoked immediately.

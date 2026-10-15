@@ -315,3 +315,23 @@ Dockerfile and CI · frontend (mobile) app · saved places / address book · tri
 - Open: access tokens are not revocable (max 15 min of residual access); no per-device names/list endpoint;
   no rate limiting on `/auth/refresh` or `/auth/login`; no short grace window for a client that retries a
   refresh whose response was lost.
+
+
+## 13. Separate background worker (added after refresh tokens)
+
+- `RUN_MODE=inline` (default, unchanged) or `worker`. In worker mode the API only inserts the queued run
+  (and skips the startup sweep); `python -m app.worker` executes it.
+- Postgres is the queue: `optimization_runs` gained `attempts`, `run_after` (retry back-off), `started_at`,
+  `heartbeat_at` (the lease), `locked_by`, plus index `(status, created_at)` (migration `0003`).
+- Claim = `SELECT ... FOR UPDATE SKIP LOCKED` + guarded `UPDATE ... WHERE status='queued'` (portable to SQLite).
+- Heartbeat every lease/3 while solving; the result is stored only if the run is still `running` and
+  `locked_by` this worker, otherwise it is discarded (another worker owns the run now).
+- Lease reaper (every 15 s per worker): expired `running` runs go back to `queued`, or to `failed` when
+  `attempts >= RUN_MAX_ATTEMPTS`.
+- Retries: `RoutingServiceError`, unexpected exceptions and failed saves retry with back-off
+  `attempt x RUN_RETRY_BACKOFF_S`; other `EngineError`s fail immediately.
+- Graceful shutdown: stop claiming, wait `WORKER_SHUTDOWN_GRACE_S`, hand unfinished runs back (attempt not counted).
+- Open: polling, not LISTEN/NOTIFY (and polling keeps a Neon database awake); no job priorities; no
+  worker status endpoint or metrics; `find_active_run` still uses `RUN_TIMEOUT_MINUTES`, so a run queued
+  longer than that (no worker running) no longer blocks a new run; no dead-letter view for failed runs;
+  Windows has no SIGTERM handler (Ctrl+C works).

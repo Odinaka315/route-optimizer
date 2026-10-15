@@ -51,12 +51,13 @@ def create_app(
                     "OSRM_URL points at the public demo server, which is for development only. "
                     "Self-host OSRM before real use."
                 )
-        try:
-            failed = await sweep_stale_runs(sessionmaker, settings.run_timeout_minutes)
-            if failed:
-                logger.warning("Marked %d stuck optimization run(s) as failed", failed)
-        except Exception:  # noqa: BLE001 - e.g. database still waking up; don't block startup
-            logger.warning("Could not clean up stale runs at startup", exc_info=True)
+        if settings.run_mode == "inline":  # in worker mode the worker owns recovery
+            try:
+                failed = await sweep_stale_runs(sessionmaker, settings.run_timeout_minutes)
+                if failed:
+                    logger.warning("Marked %d stuck optimization run(s) as failed", failed)
+            except Exception:  # noqa: BLE001 - e.g. database still waking up; don't block startup
+                logger.warning("Could not clean up stale runs at startup", exc_info=True)
         try:
             async with sessionmaker() as session:
                 await purge_expired(session)

@@ -34,6 +34,10 @@ def read_schema(url: str) -> dict:
         inspector = inspect(connection)
         tables = set(inspector.get_table_names())
         schema = {"tables": tables, "trips_indexes": set(), "trip_stops_indexes": {}, "refresh_indexes": set()}
+        schema["run_columns"], schema["run_indexes"] = set(), set()
+        if "optimization_runs" in tables:
+            schema["run_columns"] = {c["name"] for c in inspector.get_columns("optimization_runs")}
+            schema["run_indexes"] = {i["name"] for i in inspector.get_indexes("optimization_runs")}
         if "refresh_tokens" in tables:
             schema["refresh_indexes"] = {i["name"] for i in inspector.get_indexes("refresh_tokens")}
         if "trips" in tables:
@@ -77,6 +81,8 @@ def test_upgrade_matches_models_and_downgrades_cleanly(database_url):
         assert {"ix_trips_user_created", "ix_trips_user_starred", "ix_trips_parent_trip_id"} <= schema["trips_indexes"]
         assert bool(schema["trip_stops_indexes"].get("uq_trip_stops_one_start"))  # present and unique
         assert {"ix_refresh_tokens_user_id", "ix_refresh_tokens_family_id"} <= schema["refresh_indexes"]
+        assert {"attempts", "run_after", "started_at", "heartbeat_at", "locked_by"} <= schema["run_columns"]
+        assert "ix_optimization_runs_status_created" in schema["run_indexes"]
     finally:
         command.downgrade(cfg, "base")
 

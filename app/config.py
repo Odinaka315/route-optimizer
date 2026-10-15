@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     max_stops: int = Field(50, ge=2, le=200)
     max_concurrent_solves: int = Field(2, ge=1)
     run_timeout_minutes: int = Field(10, ge=1)
+    # inline = the API process solves in the background (simple, one server).
+    # worker = the API only queues runs; a separate `python -m app.worker` process solves them.
+    run_mode: Literal["inline", "worker"] = "inline"
+
+    # --- worker (only used when you run `python -m app.worker`) ----------------
+    worker_poll_interval_s: float = Field(2.0, ge=0.1, le=60)  # how often to look for queued runs
+    run_lease_seconds: int = Field(90, ge=10)  # a running job whose heartbeat is older than this is presumed dead
+    run_max_attempts: int = Field(3, ge=1, le=10)  # tries per run before it is marked failed
+    run_retry_backoff_s: int = Field(10, ge=0)  # wait attempt x this long before a retry
+    worker_shutdown_grace_s: int = Field(30, ge=0)  # on SIGTERM, let running solves finish this long
 
     # --- geocoding ----------------------------------------------------------
     geocoder_provider: Literal["nominatim", "mapbox"] = "nominatim"

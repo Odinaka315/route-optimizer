@@ -209,12 +209,19 @@ class OptimizationRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Queue bookkeeping, used only when a separate worker runs the jobs (RUN_MODE=worker).
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    run_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # retry back-off
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # the lease
+    locked_by: Mapped[str | None] = mapped_column(String(100))  # which worker holds the run
 
     __table_args__ = (
         CheckConstraint(
             "status IN ('queued', 'running', 'succeeded', 'failed')", name="status_valid"
         ),
         Index("ix_optimization_runs_trip_created", "trip_id", "created_at"),
+        Index("ix_optimization_runs_status_created", "status", "created_at"),
     )
 
 
