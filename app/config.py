@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from email.utils import parseaddr
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PUBLIC_OSRM_DEMO = "https://router.project-osrm.org"
@@ -42,8 +43,19 @@ class Settings(BaseSettings):
     # --- email --------------------------------------------------------------
     app_base_url: str = "http://localhost:3000"  # base of the links put in emails
     cors_origins: str = ""  # comma-separated, e.g. "http://localhost:3000,https://app.example.com"
-    email_backend: Literal["console", "smtp"] = "console"
-    email_from: str = "Route Optimizer <no-reply@example.com>"
+    email_backend: Literal["brevo", "console", "smtp"] = "brevo"
+    email_from: str = "routeWise <nwolisaodinaka5@gmail.com>"
+    email_from_name: str = "routeWise"
+    email_from_email: str = "nwolisaodinaka5@gmail.com"
+    brevo_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "BREVO_API_KEY",
+            "BREVO_SECRET_KEY",
+            "brevo_api_key",
+            "brevo_secret_key",
+        ),
+    )
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
@@ -89,7 +101,19 @@ class Settings(BaseSettings):
             raise ValueError("SMTP_HOST is required when EMAIL_BACKEND=smtp")
         if self.environment == "production" and self.secret_key.lower().startswith("change-me"):
             raise ValueError("SECRET_KEY is still the placeholder value; generate a real one")
+        if self.email_backend == "brevo" and not self.brevo_api_key and self.environment == "production":
+            raise ValueError("BREVO_API_KEY (or BREVO_SECRET_KEY) is required when EMAIL_BACKEND=brevo in production")
         return self
+
+    @property
+    def sender_email(self) -> str:
+        _, addr = parseaddr(self.email_from)
+        return addr or self.email_from_email
+
+    @property
+    def sender_name(self) -> str:
+        name, _ = parseaddr(self.email_from)
+        return name or self.email_from_name
 
     @property
     def cors_origin_list(self) -> list[str]:

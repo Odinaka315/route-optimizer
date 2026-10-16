@@ -186,3 +186,109 @@ def test_console_email_is_visible_in_the_terminal(capsys):
     ConsoleEmailSender().send(EmailMessage("a@example.com", "Hi", "Click http://app/verify-email?token=abc"))
     out = capsys.readouterr().out
     assert "a@example.com" in out and "verify-email?token=abc" in out
+
+
+# --- brevo email -----------------------------------------------------------------
+
+
+def test_brevo_needs_key_in_production():
+    with pytest.raises(ValueError, match="BREVO_API_KEY"):
+        make(environment="production", email_backend="brevo", brevo_api_key=None)
+    s = make(environment="production", email_backend="brevo", brevo_api_key="xkeysib-test-key-123")
+    assert s.brevo_api_key == "xkeysib-test-key-123"
+
+
+def test_brevo_secret_key_alias():
+    s = make(brevo_secret_key="my-brevo-secret")
+    assert s.brevo_api_key == "my-brevo-secret"
+
+
+def test_sender_email_and_name_default():
+    s = make()
+    assert s.sender_email == "nwolisaodinaka5@gmail.com"
+    assert s.sender_name == "routeWise"
+
+
+def test_brevo_sender_missing_key_raises():
+    from app.emailer import BrevoEmailSender, BrevoError, EmailMessage
+
+    sender = BrevoEmailSender(api_key="")
+    with pytest.raises(BrevoError, match="not configured"):
+        sender.send(EmailMessage("user@example.com", "Subject", "Body"))
+
+
+def test_brevo_sender_successful_api_call(monkeypatch):
+    import requests
+    from app.emailer import BrevoEmailSender, EmailMessage
+
+    recorded = {}
+
+    def fake_post(url, headers, json, timeout):
+        recorded["url"] = url
+        recorded["headers"] = headers
+        recorded["json"] = json
+        recorded["timeout"] = timeout
+
+        class FakeResponse:
+            ok = True
+            status_code = 201
+
+            def json(self):
+                return {"messageId": "<msg-123@brevo>"}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    sender = BrevoEmailSender(
+        api_key="xkeysib-secret-key-123",
+        sender_email="nwolisaodinaka5@gmail.com",
+        sender_name="routeWise",
+    )
+    msg = EmailMessage("recipient@example.com", "Test Subject", "Hello world line 1\n\nLine 2")
+    sender.send(msg)
+
+    assert recorded["url"] == "https://api.brevo.com/v3/smtp/email"
+    assert recorded["headers"]["api-key"] == "xkeysib-secret-key-123"
+    assert recorded["headers"]["content-type"] == "application/json"
+    assert recorded["json"]["sender"]["name"] == "routeWise"
+    assert recorded["json"]["sender"]["email"] == "nwolisaodinaka5@gmail.com"
+    assert recorded["json"]["to"] == [{"email": "recipient@example.com"}]
+    assert recorded["json"]["subject"] == "Test Subject"
+    assert recorded["json"]["textContent"] == "Hello world line 1\n\nLine 2"
+    assert "<p" in recorded["json"]["htmlContent"]
+    assert "routeWise" in recorded["json"]["htmlContent"]
+
+
+def test_brevo_sender_error_handling(monkeypatch):
+    import requests
+    from app.emailer import BrevoEmailSender, BrevoError, EmailMessage
+
+    def fake_post(url, headers, json, timeout):
+        class FakeResponse:
+            ok = False
+            status_code = 400
+            text = "Bad Request"
+
+            def json(self):
+                return {"message": "Invalid sender email address"}
+
+        return FakeResponse()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    sender = BrevoEmailSender(api_key="xkeysib-invalid")
+    with pytest.raises(BrevoError, match="Invalid sender email address"):
+        sender.send(EmailMessage("recipient@example.com", "Test", "Body"))
+
+
+def test_build_email_sender_brevo():
+    from app.emailer import BrevoEmailSender, build_email_sender
+
+    s = make(email_backend="brevo", brevo_api_key="key-123")
+    sender = build_email_sender(s)
+    assert isinstance(sender, BrevoEmailSender)
+    assert sender.api_key == "key-123"
+    assert sender.sender_email == "nwolisaodinaka5@gmail.com"
+    assert sender.sender_name == "routeWise"
+

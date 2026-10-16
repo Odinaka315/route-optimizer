@@ -41,7 +41,7 @@ Edit `.env`. The settings that matter first:
 | `DATABASE_URL` | Neon's **pooled** connection string (host contains `-pooler`). Paste it exactly as Neon shows it. |
 | `ALEMBIC_DATABASE_URL` | Neon's **direct** connection string (no `-pooler`), used only for migrations. |
 | `SECRET_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
-| `EMAIL_BACKEND` | `console` for now: verification and reset links are printed in the terminal running the server. Switch to `smtp` (any provider that offers SMTP) before real users. |
+| `EMAIL_BACKEND` | `brevo` to send real emails via Brevo REST API using `BREVO_API_KEY` (or `BREVO_SECRET_KEY`). Alternatively `console` (development) or `smtp`. |
 | `MATRIX_BACKEND` | `osrm` for real road data, or `haversine` for a rough offline estimate. |
 
 Everything else has a sensible default; see `.env.example` for the full list.
