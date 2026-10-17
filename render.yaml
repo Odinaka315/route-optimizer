@@ -1,0 +1,34 @@
+# Render Blueprint: one web service that runs the API and the worker together.
+# Dashboard > New > Blueprint > pick this repo. Fill in the values marked "sync: false".
+services:
+  - type: web
+    name: route-optimizer
+    runtime: python
+    plan: starter           # "free" works for a demo but sleeps when idle (see README) and is tight on memory
+    buildCommand: pip install -r requirements.txt
+    # Migrate, then run the API (on $PORT) and the worker in one service.
+    startCommand: alembic upgrade head && python -m app.serve
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL          # Neon POOLED string (host contains -pooler)
+        sync: false
+      - key: ALEMBIC_DATABASE_URL  # Neon DIRECT string (no -pooler), used for migrations
+        sync: false
+      - key: APP_BASE_URL          # where your web/mobile app lives (links in emails)
+        sync: false
+      - key: CORS_ORIGINS          # browser apps only, comma-separated
+        sync: false
+      - key: EMAIL_BACKEND         # change to smtp and add the SMTP_* variables before real users
+        value: console
+      - key: MATRIX_BACKEND
+        value: osrm
+      - key: OSRM_URL              # your own OSRM server; the public demo is for development only
+        sync: false
+      - key: GEOCODER_PROVIDER
+        value: mapbox
+      - key: MAPBOX_ACCESS_TOKEN
+        sync: false

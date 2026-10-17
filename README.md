@@ -13,7 +13,7 @@ optimizer/   the engine: geocoding, travel-cost matrix, solvers, road geometry, 
 app/         the API: routes, schemas, models, auth, background runs   (version 2)
              app/worker.py is the optional separate worker process
 alembic/     database migrations
-tests/       245 tests
+tests/       248 tests
 main.py      the command-line tool (version 1)
 ```
 
@@ -121,6 +121,29 @@ it still owns the run. Behaviour you get over inline mode:
 Run `alembic upgrade head` first (migration `0003` adds the queue columns). With no worker running,
 queued runs simply wait, so keep one running. Note that a polling worker keeps a Neon database awake
 (it won't scale to zero while the worker is up); raise `WORKER_POLL_INTERVAL_S` if that costs you.
+
+### Deploying on Render (API + worker in one service)
+
+`python -m app.serve` starts the API (on `$PORT`) and the worker together and forces `RUN_MODE=worker`,
+so a single Render web service does both jobs. If either process dies, the other is stopped and the
+service exits so Render restarts it (you never end up with an API and no worker). On shutdown both stop
+gracefully.
+
+- **Build command:** `pip install -r requirements.txt`
+- **Start command:** `alembic upgrade head && python -m app.serve`
+- **Health check path:** `/health`
+- **Environment:** `DATABASE_URL` (Neon pooled), `ALEMBIC_DATABASE_URL` (Neon direct), `SECRET_KEY`,
+  `ENVIRONMENT=production`, `APP_BASE_URL`, `CORS_ORIGINS`, `MATRIX_BACKEND`, `OSRM_URL`,
+  `GEOCODER_PROVIDER` and `MAPBOX_ACCESS_TOKEN`, plus the `SMTP_*` settings once `EMAIL_BACKEND=smtp`.
+
+`render.yaml` in the repo root sets all of this up as a Blueprint. Keep **one instance**: migrations run
+on every start, and extra instances would each run their own worker (which is safe, but they would all
+migrate at once). To scale solving later, move the worker to its own Render *Background Worker* with
+start command `python -m app.worker`, and the web service to `alembic upgrade head && uvicorn app.main:create_app --factory --host 0.0.0.0 --port $PORT` with `RUN_MODE=worker`.
+
+Free-plan caveats: a free web service sleeps after about 15 minutes without requests, and the worker
+sleeps with it, so a queued run waits until the next request wakes the service. Its 512 MB of memory is
+also tight for two Python processes plus the solver. Use a paid plan for real riders.
 
 ### Staying logged in (refresh tokens)
 
