@@ -18,10 +18,26 @@ async def test_signup_creates_unverified_account_and_sends_email(env):
     assert message.to == "rider@example.com" and "/verify-email?token=" in message.body
 
 
-async def test_duplicate_email_is_rejected_case_insensitively(env):
-    await env.client.post("/auth/signup", json={"email": "a@example.com", "password": PASSWORD})
+async def test_duplicate_verified_email_is_rejected_case_insensitively(env):
+    await env.register("a@example.com")
     r = await env.client.post("/auth/signup", json={"email": "A@EXAMPLE.COM", "password": PASSWORD})
     assert r.status_code == 409
+    assert "already uses" in r.json()["detail"].lower()
+    assert "log in instead" in r.json()["detail"].lower()
+
+
+async def test_duplicate_unverified_email_resends_verification(env):
+    r1 = await env.client.post("/auth/signup", json={"email": "unverified@example.com", "password": PASSWORD})
+    assert r1.status_code == 201
+    assert len(env.emails.outbox) == 1
+
+    r2 = await env.client.post("/auth/signup", json={"email": "UNVERIFIED@EXAMPLE.COM", "password": PASSWORD})
+    assert r2.status_code == 201
+    assert len(env.emails.outbox) == 2
+    # The new token can be used to verify the email
+    token = env.last_token()
+    v = await env.client.post("/auth/verify-email", json={"token": token})
+    assert v.status_code == 200
 
 
 async def test_signup_validation(env):

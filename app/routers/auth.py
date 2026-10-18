@@ -140,8 +140,16 @@ async def signup(
     sender: EmailSender = Depends(get_email_sender),
 ) -> UserOut:
     email = _normalize_email(body.email)
-    if await session.scalar(select(User.id).where(User.email == email)):
-        raise HTTPException(status.HTTP_409_CONFLICT, "An account with this email already exists")
+    existing_user = await session.scalar(select(User).where(User.email == email))
+    if existing_user is not None:
+        if existing_user.email_verified_at is None:
+            if settings.require_email_verification:
+                background_tasks.add_task(_deliver, sender, _verification_message(existing_user, settings))
+            return UserOut.from_user(existing_user)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "An account already uses this email address. Would you like to log in instead?",
+        )
 
     password_hash = await run_in_threadpool(hash_password, body.password)
     user = User(email=email, password_hash=password_hash, display_name=body.display_name)
@@ -150,8 +158,14 @@ async def signup(
         await session.commit()
     except IntegrityError:  # two signups for the same email raced each other
         await session.rollback()
+        raced_user = await session.scalar(select(User).where(User.email == email))
+        if raced_user is not None and raced_user.email_verified_at is None:
+            if settings.require_email_verification:
+                background_tasks.add_task(_deliver, sender, _verification_message(raced_user, settings))
+            return UserOut.from_user(raced_user)
         raise HTTPException(
-            status.HTTP_409_CONFLICT, "An account with this email already exists"
+            status.HTTP_409_CONFLICT,
+            "An account already uses this email address. Would you like to log in instead?",
         ) from None
 
     if settings.require_email_verification:
