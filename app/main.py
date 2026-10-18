@@ -17,7 +17,8 @@ from . import __version__
 from .config import PUBLIC_OSRM_DEMO, Settings, get_settings
 from .db import build_engine, build_sessionmaker
 from .emailer import EmailSender, build_email_sender
-from .routers import auth, health, optimize, trips
+from .logging_utils import install_token_redaction
+from .routers import app_links, auth, health, optimize, trips
 from .services.geocoding import Geocoder, build_geocoder
 from .services.jobs import sweep_stale_runs
 from .services.refresh_tokens import purge_expired
@@ -35,6 +36,7 @@ def create_app(
     """Build the app. The keyword arguments let tests swap in fakes; in production
     everything comes from the settings."""
     settings = settings or get_settings()
+    install_token_redaction()
     engine = engine or build_engine(
         settings.database_url,
         pool_size=settings.db_pool_size,
@@ -90,6 +92,7 @@ def create_app(
         )
 
     app.include_router(health.router)
+    app.include_router(app_links.router)
     app.include_router(auth.router)
     app.include_router(trips.router)
     app.include_router(optimize.router)

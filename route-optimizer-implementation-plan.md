@@ -335,3 +335,17 @@ Dockerfile and CI · frontend (mobile) app · saved places / address book · tri
   worker status endpoint or metrics; `find_active_run` still uses `RUN_TIMEOUT_MINUTES`, so a run queued
   longer than that (no worker running) no longer blocks a new run; no dead-letter view for failed runs;
   Windows has no SIGTERM handler (Ctrl+C works).
+
+
+## 14. App links and web fallback pages (added after Render deploy)
+
+- Emailed links stay `APP_BASE_URL/verify-email?token=` and `/reset-password?token=`; with no separate website,
+  `APP_BASE_URL` is the backend's own public URL.
+- `app/routers/app_links.py`: `/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association`
+  (404 until configured; settings validated at startup), plus GET `/verify-email` and `/reset-password` pages
+  (`app/web_pages.py`) that call `POST /auth/verify-email` / `/auth/reset-password` from the browser.
+- Pages: per-response CSP nonce, `no-store`, `no-referrer`, token read client-side then removed from the URL,
+  nothing from the request reflected server-side.
+- `app/logging_utils.py` redacts `token=` in uvicorn's access log.
+- Open: no Play-signing/EAS fingerprint helper (copy from Play Console/`eas credentials`); iOS file untested
+  on a real device; the web pages are minimal and unbranded; no rate limiting on the token endpoints.
