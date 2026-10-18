@@ -13,7 +13,7 @@ optimizer/   the engine: geocoding, travel-cost matrix, solvers, road geometry, 
 app/         the API: routes, schemas, models, auth, background runs   (version 2)
              app/worker.py is the optional separate worker process
 alembic/     database migrations
-tests/       248 tests
+tests/       282 tests
 main.py      the command-line tool (version 1)
 ```
 
@@ -144,6 +144,30 @@ start command `python -m app.worker`, and the web service to `alembic upgrade he
 Free-plan caveats: a free web service sleeps after about 15 minutes without requests, and the worker
 sleeps with it, so a queued run waits until the next request wakes the service. Its 512 MB of memory is
 also tight for two Python processes plus the solver. Use a paid plan for real riders.
+
+### Opening emailed links in the mobile app
+
+Verification and reset emails link to `APP_BASE_URL` + `/verify-email?token=...` (or `/reset-password`).
+With no separate website, set `APP_BASE_URL` to this backend's public address (for example
+`https://your-service.onrender.com`, no trailing slash). The backend then serves everything the links need:
+
+- **Web pages** at `/verify-email` and `/reset-password` that finish the job in the browser (they call the
+  same JSON API the app uses). People without the app installed land here. The page removes the token from
+  the address bar and never writes it into the HTML.
+- **`/.well-known/assetlinks.json`** (Android App Links) from `ANDROID_PACKAGE_NAME` and
+  `ANDROID_SHA256_FINGERPRINTS` (comma-separated: debug, release and the Google Play signing key are
+  different keys).
+- **`/.well-known/apple-app-site-association`** (iOS Universal Links) from `APPLE_TEAM_ID` and
+  `IOS_BUNDLE_ID`.
+- Optional `APP_SCHEME` adds an "Open in the app" button using a custom scheme.
+
+Each well-known file returns 404 until its settings are filled in. Check them with
+`https://<your-domain>/.well-known/assetlinks.json` and Google's checker
+`https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://<your-domain>&relation=delegate_permission/common.handle_all_urls`.
+The app side (intent filters, screens) lives in the mobile project; the paths it must
+handle are `/verify-email` and `/reset-password`. Changing the domain later means rebuilding the app, so
+settle on a custom domain before the first public release. Tokens are also redacted from uvicorn's access
+log (`token=[redacted]`).
 
 ### Staying logged in (refresh tokens)
 
