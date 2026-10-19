@@ -186,3 +186,16 @@ async def test_failing_email_provider_does_not_break_signup(app_factory):
     env.app.state.email_sender = Broken()
     r = await env.client.post("/auth/signup", json={"email": "a@example.com", "password": PASSWORD})
     assert r.status_code == 201
+
+
+async def test_user_can_change_their_display_name(env, auth):
+    r = await env.client.patch("/auth/me", json={"display_name": "  Ada O.  "}, headers=auth)
+    assert r.status_code == 200 and r.json()["display_name"] == "Ada O."
+    me = await env.client.get("/auth/me", headers=auth)
+    assert me.json()["display_name"] == "Ada O."
+
+
+async def test_display_name_update_validates_and_needs_login(env, auth):
+    assert (await env.client.patch("/auth/me", json={"display_name": "   "}, headers=auth)).status_code == 422
+    assert (await env.client.patch("/auth/me", json={"display_name": "x" * 101}, headers=auth)).status_code == 422
+    assert (await env.client.patch("/auth/me", json={"display_name": "Ada"})).status_code == 401
