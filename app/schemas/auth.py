@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from ..models import User
 
@@ -26,6 +26,18 @@ class TokenResponse(BaseModel):
     expires_in: int  # access token lifetime, seconds
     refresh_token: str
     refresh_expires_in: int  # seconds
+
+
+class ProfileUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("display_name must not be blank")
+        return value
 
 
 class RefreshRequest(BaseModel):

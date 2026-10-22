@@ -21,6 +21,7 @@ from ..schemas.auth import (
     EmailRequest,
     LoginRequest,
     MessageResponse,
+    ProfileUpdate,
     RefreshRequest,
     ResetPasswordRequest,
     SignupRequest,
@@ -315,4 +316,16 @@ async def reset_password(
 
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)) -> UserOut:
+    return UserOut.from_user(user)
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(
+    body: ProfileUpdate,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserOut:
+    """Change the display name shown in the app."""
+    user.display_name = body.display_name
+    await session.commit()
     return UserOut.from_user(user)
